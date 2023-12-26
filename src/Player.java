@@ -12,12 +12,16 @@
         final static int LIGHT_0_RADIUS = 800;
         final static int LIGHT_1_RADIUS = 2000;
         final static int LIGHT_MONSTERS_EXTRA = 300;
+        final static Point ORIGIN = new Point(0,0);
 
-        final static int LIGHT_ON_EVERY = 4;
+        final static int DIVE_LIGHT_ON_EVERY = 4;
+        final static int AT_DEPTH_LIGHT_ON_EVERY = 3;
 
         static int creatureCount;
         static Map<Integer, Creature> creatures = new HashMap<>();
         static Map<Integer, Drone> drones = new HashMap<>();
+
+        static int turn = 0;
 
         enum Depth {
             L1(0,2500),L2(1,5000),L3(2,7500);
@@ -90,15 +94,21 @@
                 return new Point(dx, dy);
             }
 
-            public Vector add(Vector other) {
+            public Vector add(Vector u) {
                 Vector v = new Vector();
-                v.x = this.x + other.x;
-                v.y = this.y + other.y;
+                v.x = this.x + u.x;
+                v.y = this.y + u.y;
                 return v;
             }
 
             public double size() {
                 return Math.sqrt(Math.pow(this.x,2)+Math.pow(this.y,2));
+            }
+
+            public double angleTo(Vector v) {
+                double num = this.x*v.x + this.y*v.y;
+                double den = (Math.sqrt(Math.pow(v.x, 2) + Math.pow(v.y, 2)) * (Math.sqrt(Math.pow(this.x, 2) + Math.pow(this.y, 2))) );
+                return Math.abs(Math.acos(num / den) % Math.PI);
             }
 
             Vector copy() {
@@ -125,27 +135,69 @@
                 return target;
             }
 
-            public boolean isLightOn(Drone drone) {
-                return drone.turn%LIGHT_ON_EVERY==0;
-            }
+            public abstract boolean isLightOn(Drone drone);
 
         }
 
         static class Dive extends Strategy {
 
-            private final Depth depth;
+            private Depth depth;
+            private final int startTurn;
 
             public Dive(Depth depth) {
                 super(new Point(0, depth.middle));
                 this.depth = depth;
+                this.startTurn = turn;
             }
 
             public Point getTarget(Drone drone) {
-                return new Point(drone.pos.x, target.y);
+
+                boolean run = true;
+                while(run && depth!=null) {
+                    List<Creature> notScanned = creatures.values().stream()
+                            .filter(c->c.type!=-1)
+                            .filter(c->!c.myScan)
+                            .filter(c->depth.type==c.type)
+                            .toList();
+                    run = notScanned.size() == 0;
+                    if(run) {
+                        if(depth == Depth.L3) depth=Depth.L2;
+                        else if(depth == Depth.L2) depth=Depth.L2;
+                        else depth = null;
+                    }
+                }
+
+                long leftCount = creatures.values().stream()
+                        .filter(c->drone.radars.get("BL").contains(c.id)||drone.radars.get("TL").contains(c.id))
+                        .mapToInt(c->c.foeScan?1:2)// prioritize those which were not scanned by the other
+                        .sum();
+
+                long rightCount = creatures.values().stream()
+                        .filter(c->drone.radars.get("BR").contains(c.id)||drone.radars.get("TR").contains(c.id))
+                        .mapToInt(c->c.foeScan?1:2)// prioritize those which were not scanned by the other
+                        .sum();
+
+                int deviation = 0;
+                if(rightCount>leftCount) deviation = 600;
+                else if(rightCount<leftCount) deviation = -600;
+                else {
+                    deviation = drone.pos.x<5000?-600:600;
+                }
+
+                System.err.println("DIVE R="+rightCount+ " L="+leftCount+" dev="+deviation);
+
+                return new Point(drone.pos.x+deviation, depth.middle);
             }
 
             public boolean isFinished(Drone drone) {
-                return drone.currentScan.stream().filter(i -> creatures.get(i).type == depth.type).count()>0;
+                return depth == null
+                        || (drone.currentScan.size()>0 && turn-startTurn > 40)
+                        || drone.currentScan.stream().filter(i -> creatures.get(i).type == depth.type).count()>(turn<40?0:1);
+            }
+
+            @Override
+            public boolean isLightOn(Drone drone) {
+                return turn%(drone.pos.y<depth.start?DIVE_LIGHT_ON_EVERY:AT_DEPTH_LIGHT_ON_EVERY)==0;
             }
         }
 
@@ -164,159 +216,163 @@
             public boolean isFinished(Drone drone) {
                 return drone.pos.y <= 500;
             }
+
+            @Override
+            public boolean isLightOn(Drone drone) {
+                return turn%DIVE_LIGHT_ON_EVERY==0 && drone.pos.y <= Depth.L2.middle;
+            }
         }
 
         static class Avoid extends Strategy {
 
-            private final Set<Integer> monsters = new HashSet<>();
-            private int step = Integer.MAX_VALUE;
+            private Strategy next;
+            private boolean finished = false;
 
-            public Avoid(Point target, List<Creature> monsters) {
-                super(target);
-                addMonsters(monsters);
+            public Avoid(Strategy next) {
+                super(next.target);
+                this.next = next;
             }
 
-            public void addMonsters(List<Creature> monsters) {
-                monsters.forEach(m-> {
-                    this.monsters.add(m.id);
-                });
-            }
-
-            List<Integer> step1TargettingMe;
-            Vector step1AvoidVector;
 
             @Override
             public Point getTarget(Drone drone) {
-                System.err.println("AVOID getTarget droneId="+drone.id + " step="+step+" target.x="+target.x+" target.y="+target.y);
-                /*List<Integer> targettingMe = monsters.stream()
-                        .filter(i -> drone.pos.distanceTo(creatures.get(i).pos) <= (drone.light?LIGHT_1_RADIUS:LIGHT_0_RADIUS))
-                        .toList();*/
+                System.err.println("AVOID getTarget droneId="+drone.id);
 
-                List<Integer> targettingMe = monsters.stream()
-                        .map(i->creatures.get(i))
-                        .filter(m -> drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < KILL_DISTANCE)
-                        .map(m->m.id)
+                // select monsters type
+                List<Creature> monsters = creatures.values().stream()
+                        .filter(m -> m.type == -1)
                         .toList();
 
-                targettingMe.stream()
-                        .map(i->creatures.get(i))
-                        .forEach(m->System.err.println("AVOID targettingMe id="+m.id+" x="+m.pos.x+" y="+m.pos.y));
+                // select all monsters closer to 800
+                List<Creature> absoluteDanger = monsters.stream()
+                        .filter(m -> drone.pos.distanceTo(m.pos) <= 800)
+                        .toList();
+                absoluteDanger.forEach(m -> System.err.println("AVOID getTarget ABSOLUTEDANGER id="+m.id));
 
-                Vector avoidVector = new Vector();
+                // select all monsters those who are under our light but not closer to 800, and going towards us
+                List<Creature> potentialDanger = monsters.stream()
+                        .filter(m -> !absoluteDanger.contains(m))
+                        .filter(m -> drone.pos.distanceTo(m.pos) <= LIGHT_MONSTERS_EXTRA+(drone.light?LIGHT_1_RADIUS:LIGHT_0_RADIUS))
+                        .filter(m-> drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy)))<KILL_DISTANCE)
+                        .toList();
+                potentialDanger.forEach(m -> System.err.println("AVOID getTarget POTENTIAL id="+m.id));
 
-                /*if(!targettingMe.isEmpty()) {
-                    step = 1;
-                    System.err.println("AVOID getTarget step=1");
-                    step1TargettingMe = targettingMe;
-                    // flew in opposite direction
-                    Vector vec = new Vector();
-                    targettingMe.forEach(i -> {
-                        Creature m = creatures.get(i);
-                        double dist = drone.pos.distanceTo(m.pos);
-                        vec.x += m.vx / dist;
-                        vec.y += m.vy / dist;
-                        System.err.println("AVOID getTarget step 1 : monster.id="+i+" dist="+dist+" vec.x="+vec.x+" vec.y="+vec.y);
-                    });
-                    avoidVector = vec;
-                    step1AvoidVector = vec.copy();
-                } else {
-                    Set<Integer> processed = new HashSet<>();
-                    if(step==1) {
-                        step = 2;
-                        processed.addAll(step1TargettingMe);
-                        System.err.println("AVOID getTarget step=2 target.x="+target.x+" target.y="+target.y);
-                        // turn by PI/2
-                        // choose the +PI/2 or -PI/2 which result to be closer to target and not off the map
-                        Point p1 = step1AvoidVector.rotate(Math.PI/2d).normalizedDirection(MAX_MOVE).add(drone.pos);
-                        Point p2 = step1AvoidVector.rotate(-Math.PI/2d).normalizedDirection(MAX_MOVE).add(drone.pos);
-                        //System.err.println("AVOID getTarget step=2 p1.x="+p1.x+" p1.y="+p1.y+" p2.x="+p2.x+" p2.y="+p2.y);
-                        //System.err.println("AVOID getTarget step=2 dist1="+p1.distanceTo(target)+" dist2="+p2.distanceTo(target));
-                        if(p1.distanceTo(target) < p2.distanceTo(target) && p1.x>=0 && p1.x<=10000 && p1.y>=0 && p1.y<=10000) {
-                            System.err.println("AVOID getTarget step=2 rotation=+ p.x="+p1.x+" p.y="+p1.y);
-                            avoidVector = drone.pos.vectorTo(p1);
-                            //System.err.println("AVOID getTarget step=2 rotation=+ v.x="+avoidVector.x+" p.y="+avoidVector.y);
-                        } else {
-                            System.err.println("AVOID getTarget step=2 rotation=- p.x="+p2.x+" p.y="+p2.y);
-                            avoidVector = drone.pos.vectorTo(p2);
-                            //System.err.println("AVOID getTarget step=2 rotation=- v.x="+avoidVector.x+" v.y="+avoidVector.y);
+                // select all monsters being globaly visible which could a potential danger in next turn
+                List<Creature> nextPotential = monsters.stream()
+                        .filter(m -> !absoluteDanger.contains(m))
+                        .filter(m -> !potentialDanger.contains(m))
+                        .filter(m -> m.visible || m.wasVisible)
+                        .toList();
+                nextPotential.forEach(m -> System.err.println("AVOID getTarget NEXT id="+m.id));
+
+                Set<Integer> additionnal = new HashSet<>();
+
+                Point t = new Point(5000,5000);
+                boolean run = true;
+                while (run) {
+                    finished = false;
+                    Vector avoidVector = new Vector();
+
+                    if(!absoluteDanger.isEmpty() || potentialDanger.size()>1) {
+                        // flew in opposite direction
+                        Set<Integer> list = new HashSet<>();
+                        list.addAll(absoluteDanger.stream().map(m->m.id).toList());
+                        list.addAll(potentialDanger.stream().map(m->m.id).toList());
+                        list.addAll(additionnal);
+                        Vector vec = new Vector();
+                        list.stream().map(i -> creatures.get(i))
+                                .forEach(m -> {
+                                    double dist = drone.pos.distanceTo(m.pos);
+                                    Point p = ORIGIN.vectorTo(new Point(m.vx, m.vy)).normalizedDirection(1);
+                                    vec.x += p.x;
+                                    vec.y += p.y;
+                                    /*double dist = drone.pos.distanceTo(m.pos);
+                                    vec.x += m.vx / dist;
+                                    vec.y += m.vy / dist;*/
+                                    System.err.println("AVOID getTarget step 1 : monster.id="+m.id+" dist="+dist+" vec.x="+vec.x+" vec.y="+vec.y);
+                                });
+                        // avoid borders
+                        if(drone.pos.y>=9000) {
+                            Point p = new Point(drone.pos.x, 10000+(10000-drone.pos.y));
+                            double dist = drone.pos.distanceTo(p);
+                            vec.y += p.vectorTo(new Point(drone.pos.x, drone.pos.y)).normalizedDirection(1).y;
+                            if(vec.x==0) vec.x = vec.y/2;
+                            System.err.println("AVOID BOTTOM BORDER step 1 : dist="+dist+" vec.x="+vec.x+" vec.y="+vec.y);
                         }
-                    } else if(step==2){
-                        // go parrallel to the inital root
-                        step=3;
-                        System.err.println("AVOID getTarget step=3");
-                        avoidVector.x = -step1AvoidVector.x;
-                        avoidVector.y = -step1AvoidVector.y;
+                        avoidVector = vec;
+                    } else if(!potentialDanger.isEmpty()) {
+                        // flew by 90° minimum or direct to target
+                        Set<Integer> list = new HashSet<>();
+                        list.addAll(potentialDanger.stream().map(m->m.id).toList());
+                        list.addAll(additionnal);
+                        System.err.println("AVOID getTarget step 2 : monsters.size="+list.size());
+                        Vector vec = new Vector();
+                        list.stream()
+                                .map(i->creatures.get(i))
+                                .forEach(m -> {
+                                    double dist = drone.pos.distanceTo(m.pos);
+                                    Point p = ORIGIN.vectorTo(new Point(m.vx, m.vy)).normalizedDirection(1);
+                                    vec.x += p.x / dist;
+                                    vec.y += p.y / dist;
+                                    /*double dist = drone.pos.distanceTo(m.pos);
+                                    vec.x += m.vx / dist;
+                                    vec.y += m.vy / dist;*/
+                                    System.err.println("AVOID getTarget step 2 : monster.id="+m.id+" dist="+dist+" vec.x="+vec.x+" vec.y="+vec.y);
+                                });
+
+                        avoidVector = drone.pos.vectorTo(next.target);
+
+                        if(vec.angleTo(avoidVector)>Math.PI) {
+                            finished = true;
+                            System.err.println("AVOID getTarget step 2 : direct route to target");
+                        } else {
+                            // turn by PI/2
+                            // choose the +PI/2 or -PI/2 which result to be closer to target and not off the map
+                            Point p1 = vec.rotate(Math.PI/2d).normalizedDirection(MAX_MOVE).add(drone.pos);
+                            Point p2 = vec.rotate(-Math.PI/2d).normalizedDirection(MAX_MOVE).add(drone.pos);
+                            if(p1.distanceTo(next.getTarget(drone)) < p2.distanceTo(next.getTarget(drone)) && p1.x>=0 && p1.x<=10000 && p1.y>=0 && p1.y<=10000) {
+                                System.err.println("AVOID getTarget step 2 rotation=+ p.x="+p1.x+" p.y="+p1.y);
+                                avoidVector = drone.pos.vectorTo(p1);
+                            } else {
+                                System.err.println("AVOID getTarget step 2 rotation=- p.x="+p2.x+" p.y="+p2.y);
+                                avoidVector = drone.pos.vectorTo(p2);
+                            }
+                        }
+                    } else {
+                        finished = true;
                     }
 
-                    Vector vec = new Vector();
-                    // avoid potential monsters going towards us (not yet in light)
-                    monsters.stream()
-                            .filter(i -> !processed.contains(i))
-                            .map(i->creatures.get(i))
-                            .filter(m -> drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < KILL_DISTANCE)
-                            .forEach(m -> {
-                                processed.add(m.id);
-                                System.err.println("AVOID getTarget targettingMeNextTurn i="+m.id);
-                                double dist = drone.pos.distanceTo(m.pos);
-                                vec.x += m.vx / dist;
-                                vec.y += m.vy / dist;
-                            });
-                    avoidVector.add(vec);
-                    vec.reset();
-                    System.err.println("AVOID getTarget step="+step+" v.x="+avoidVector.x+" v.y="+avoidVector.y);
+                    if(avoidVector.size() == 0) {
+                        avoidVector = drone.pos.vectorTo(next.getTarget(drone));
+                    }
+                    Point tmp = avoidVector.normalizedDirection(MAX_MOVE).add(drone.pos);
+                    t = tmp;
 
-                    // avoid monsters which have a trajectory convergent to us in next turn
-                    Point nextPosition = avoidVector.normalizedDirection(MAX_MOVE).add(drone.pos);
-                    monsters.stream()
-                            .filter(i -> !processed.contains(i))
-                            .map(i->creatures.get(i))
-                            .filter(m -> nextPosition.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < KILL_DISTANCE)
-                            .forEach(m -> {
-                                processed.add(m.id);
-                                System.err.println("AVOID getTarget beingInKillZoneNextTurn i="+m.id);
-                                Vector avoidMonsterVector = nextPosition.vectorTo(m.pos.add(new Point(m.vx, m.vy)));
-                                double dist = avoidMonsterVector.size()*2; // *2 to diminuate this parameter influence
-                                vec.x += avoidMonsterVector.x / dist;
-                                vec.y += avoidMonsterVector.y / dist;
-                            });
-                    avoidVector.add(vec);
-                    vec.reset();
+                    // check whether there is a potential kill
+                    List<Creature> killHits = nextPotential.stream()
+                            .filter(m -> !additionnal.contains(m.id))
+                            .filter(m -> tmp.distanceTo(m.pos.add(new Point(m.vx, m.vy)))<KILL_DISTANCE)
+                            .toList();
+                    killHits.forEach(m -> System.err.println("AVOID getTarget KILL HITS id="+m.id));
+                    if(killHits.isEmpty()) {
+                        run = false;
+                    } else {
+                        additionnal.addAll(killHits.stream().map(m->m.id).toList());
+                    }
 
-                }*/
-                if(targettingMe.size() > 1) {
-                    step = 1;
-                    System.err.println("AVOID getTarget step=1");
-                    step1TargettingMe = targettingMe;
-                    // flew in opposite direction
-                    Vector vec = new Vector();
-                    targettingMe.forEach(i -> {
-                        Creature m = creatures.get(i);
-                        double dist = drone.pos.distanceTo(m.pos);
-                        vec.x += m.vx / dist;
-                        vec.y += m.vy / dist;
-                        System.err.println("AVOID getTarget step 1 : monster.id="+i+" dist="+dist+" vec.x="+vec.x+" vec.y="+vec.y);
-                    });
-                    avoidVector = vec;
-                    step1AvoidVector = vec.copy();
                 }
-
-
-
-                if(avoidVector.size() == 0) {
-                    avoidVector = drone.pos.vectorTo(target);
-                }
-                return avoidVector.normalizedDirection(MAX_MOVE).add(drone.pos);
+                return t;
             }
 
             @Override
             public boolean isLightOn(Drone drone) {
-                drone.turn = 1; // reset turn to avoid light for several turns after avoidance finished
+                drone.disableLightTurnCounter = 2;
                 return false;
             }
 
             @Override
             public boolean isFinished(Drone drone) {
-                return step>=3;
+                return finished;
             }
         }
 
@@ -330,6 +386,7 @@
             boolean myScan = false;
             boolean foeScan = false;
             boolean visible = false;
+            boolean wasVisible = false;
 
             int getScore() {
                 if(myScan) return 0;
@@ -347,7 +404,8 @@
             int battery;
             final Deque<Strategy> strategy = new ArrayDeque<>();
             int initPosition = -1;
-            private int turn = 0;
+            int disableLightTurnCounter = 0;
+
             boolean light = false;
             Set<Integer> currentScan = new HashSet<>();
             Map<String, Set<Integer>> radars = new HashMap<>();
@@ -382,7 +440,7 @@
                     System.out.println("WAIT 0");
                     return;
                 }
-                turn=(turn+1)%LIGHT_ON_EVERY;
+                disableLightTurnCounter--;
                 if(initPosition == -1) {
                     initPosition = this.pos.x<5000?0:1;
                 }
@@ -410,20 +468,16 @@
                         .toList();
                 monsters.forEach(m -> System.err.println("MONSTERS drone="+this.id+" monster="+m.id));
                 // monster avoidance management
-                if(!monsters.isEmpty()) {
-                    if(next instanceof Avoid) {
-                        ((Avoid) next).addMonsters(monsters);
-                    } else {
-                        next = new Avoid(this.pos.copy(), next.getTarget(this), monsters);
-                        strategy.push(next);
-                    }
+                if(!monsters.isEmpty() && !(next instanceof Avoid)) {
+                    next = new Avoid(next);
+                    strategy.push(next);
                 }
 
                 // get next waypoint
                 Point target = next.getTarget(this);
 
                 // light management
-                light = this.pos.y > 2000 && battery>=5 && next.isLightOn(this);
+                light = disableLightTurnCounter<0 && this.pos.y > Depth.L1.start && battery>=5 && next.isLightOn(this);
 
                 System.out.println("MOVE "+target.x+" "+target.y+" "+(light?1:0));
             }
@@ -444,6 +498,7 @@
 
             // game loop
             while (true) {
+                turn++;
                 int myScore = in.nextInt();
                 int foeScore = in.nextInt();
                 int myScanCount = in.nextInt();
@@ -489,7 +544,10 @@
                     //System.err.println("SCAN droneId="+droneId+" creatureId="+creatureId);
                     drone.currentScan.add(creatureId);
                 }
-                creatures.values().forEach(creature -> creature.visible=false);
+                creatures.values().forEach(creature -> {
+                    creature.wasVisible = creature.visible;
+                    creature.visible=false;
+                });
                 int visibleCreatureCount = in.nextInt();
                 for (int i = 0; i < visibleCreatureCount; i++) {
                     int creatureId = in.nextInt();
@@ -500,9 +558,10 @@
                     creature.vx = in.nextInt();
                     creature.vy = in.nextInt();
                 }
-                // update not visible creatures based on their last velocity vector
+                // update creatures which became not visibale on last turn based on their last velocity vector
                 creatures.values().stream()
                         .filter(c -> !c.visible)
+                        .filter(c -> c.wasVisible)
                         .forEach(c -> c.pos.add(new Point(c.vx,c.vy)));
 
                 creatures.values().forEach( c -> {

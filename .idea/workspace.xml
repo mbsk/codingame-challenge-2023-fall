@@ -4,15 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="14336eba-f30b-49f1-9109-88c3ecd89fd2" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/codingame-2023-dec.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/Player.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/Test.java" afterDir="false" />
+    <list default="true" id="14336eba-f30b-49f1-9109-88c3ecd89fd2" name="Changes" comment="version 24/12 : 707ème">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/Player.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/Player.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -77,7 +71,31 @@
       <option name="presentableId" value="Default" />
       <updated>1703026164039</updated>
     </task>
+    <task id="LOCAL-00001" summary="version 24/12 : 707ème">
+      <option name="closed" value="true" />
+      <created>1703512672225</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1703512672225</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="version 24/12 : 707ème" />
+    <option name="LAST_COMMIT_MESSAGE" value="version 24/12 : 707ème" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
