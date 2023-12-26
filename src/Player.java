@@ -1,5 +1,7 @@
     import java.util.*;
     import java.util.List;
+    import java.util.stream.Collectors;
+    import java.util.stream.Stream;
 
     /**
      * Score points by scanning valuable fish faster than your opponent.
@@ -144,17 +146,20 @@
             private Depth depth;
             private final int startTurn;
 
+
             public Dive(Depth depth) {
-                super(new Point(0, depth.middle));
+                super(new Point(-1, depth.middle));
                 this.depth = depth;
                 this.startTurn = turn;
             }
 
             public Point getTarget(Drone drone) {
 
+                List<Creature> notScanned = new ArrayList<>();
+
                 boolean run = true;
                 while(run && depth!=null) {
-                    List<Creature> notScanned = creatures.values().stream()
+                    notScanned = drone.getCreaturesByRadar().stream()
                             .filter(c->c.type!=-1)
                             .filter(c->!c.myScan)
                             .filter(c->depth.type==c.type)
@@ -162,37 +167,67 @@
                     run = notScanned.size() == 0;
                     if(run) {
                         if(depth == Depth.L3) depth=Depth.L2;
-                        else if(depth == Depth.L2) depth=Depth.L2;
+                        else if(depth == Depth.L2) depth=Depth.L1;
                         else depth = null;
                     }
                 }
 
-                long leftCount = creatures.values().stream()
+                //notScanned.forEach(c -> System.err.println("DIVE NOT SCANNED c.id="+c.id+" score="+c.getScore()));
+
+                long leftCount = notScanned.stream()
                         .filter(c->drone.radars.get("BL").contains(c.id)||drone.radars.get("TL").contains(c.id))
                         .mapToInt(c->c.foeScan?1:2)// prioritize those which were not scanned by the other
                         .sum();
 
-                long rightCount = creatures.values().stream()
+                long rightCount = notScanned.stream()
                         .filter(c->drone.radars.get("BR").contains(c.id)||drone.radars.get("TR").contains(c.id))
                         .mapToInt(c->c.foeScan?1:2)// prioritize those which were not scanned by the other
                         .sum();
 
                 int deviation = 0;
-                if(rightCount>leftCount) deviation = 600;
-                else if(rightCount<leftCount) deviation = -600;
+                if(rightCount>leftCount) deviation = 1;
+                else if(rightCount<leftCount) deviation = -1;
                 else {
-                    deviation = drone.pos.x<5000?-600:600;
+                    deviation = drone.pos.x<5000?-1:1;
                 }
 
-                System.err.println("DIVE R="+rightCount+ " L="+leftCount+" dev="+deviation);
+                long x = 5000;
+                if(drone.pos.y < depth.start) {
+                    x = drone.pos.x<=5000?2500:7500;
+                } else if(target.x == -1) {
+                    target.x = deviation>0?9000:1000;
+                    x = target.x;
+                } else {
+                    if(leftCount==0 && target.x <= 5000) target.x = 9000;
+                    else if(rightCount==0 && target.x >= 5000) target.x = 1000;
+                    x = target.x;
+                }
 
-                return new Point(drone.pos.x+deviation, depth.middle);
+                System.err.println("DIVE R="+rightCount+ " L="+leftCount+" target.x="+target.x);
+
+                return new Point(x, depth.middle);
             }
 
             public boolean isFinished(Drone drone) {
+
+                long remainingScanCount = drone.getCreaturesByRadar().stream()
+                        .filter(c->c.type!=-1)
+                        .filter(c->depth.type==c.type)
+                        .filter(c->!c.myScan)
+                        .filter(c -> drones.values().stream().filter(d->d.mine).noneMatch(d->d.currentScan.contains(c.id)))
+                        .map(c->c.id)
+                        .distinct()
+                        .count();
+
+                long scannedCount = drone.currentScan.stream().filter(i -> creatures.get(i).type == depth.type).count();
+                long score = drones.values().stream().filter(d->d.mine).mapToInt(d->d.currentScan.stream().map(i->creatures.get(i)).mapToInt(Creature::getScore).sum()).sum();
+
+                System.err.println("DIVE isFINISHED score="+score+" allCurrentScan="+drone.currentScan.size()+ " type="+depth.type+" scanCount="+scannedCount+" remaining="+remainingScanCount);
+
                 return depth == null
-                        || (drone.currentScan.size()>0 && turn-startTurn > 40)
-                        || drone.currentScan.stream().filter(i -> creatures.get(i).type == depth.type).count()>(turn<40?0:1);
+                        || score > 20
+                        || (drone.currentScan.size()>0 && turn-startTurn > 32)
+                        || (scannedCount>0 && remainingScanCount <= 1);
             }
 
             @Override
@@ -366,7 +401,7 @@
 
             @Override
             public boolean isLightOn(Drone drone) {
-                drone.disableLightTurnCounter = 2;
+                drone.disableLightTurnCounter = 4;
                 return false;
             }
 
@@ -432,6 +467,12 @@
 
             void resetRadar() {
                 radars.values().stream().forEach(Set::clear);
+            }
+
+            List<Creature> getCreaturesByRadar() {
+                List<Creature> all = new ArrayList<>();
+                radars.values().forEach(r->r.stream().map(i->creatures.get(i)).forEach(c->all.add(c)));
+                return all;
             }
 
             public void process() {
@@ -542,7 +583,7 @@
                     int creatureId = in.nextInt();
                     Drone drone = drones.get(droneId);
                     //System.err.println("SCAN droneId="+droneId+" creatureId="+creatureId);
-                    drone.currentScan.add(creatureId);
+                    if(drone.emergency==0) drone.currentScan.add(creatureId);
                 }
                 creatures.values().forEach(creature -> {
                     creature.wasVisible = creature.visible;
