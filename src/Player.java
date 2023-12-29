@@ -276,16 +276,11 @@
                         .filter(m -> m.type == -1 && (m.visible || m.wasVisible))
                         .collect(Collectors.toList()); // collect to a modifiable List
 
-                // add "fake" monsters to avoid borders
-                List<BorderAvoid> borders = BorderAvoid.getBorderAvoid(drone);
-                //monsters.addAll(borders);
-                borders.forEach(b->creatures.put(b.id,b));
-
                 // select all monsters inside 800u
                 List<Creature> absoluteDanger = monsters.stream()
                         .filter(m -> drone.pos.distanceTo(m.pos) <= 800 ) // inside LIGHT 0 ZONE
                         .filter(m -> drone.pos.distanceTo(m.pos) >= drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy)))) // going towards me
-                        .toList();
+                        .collect(Collectors.toList());
                 absoluteDanger.forEach(m -> System.err.println("AVOID getTarget ABSOLUTEDANGER id="+m.id));
 
                 // select monsters who are under our light but not closer to 800
@@ -293,14 +288,14 @@
                         .filter(m -> !absoluteDanger.contains(m))
                         .filter(m -> drone.pos.distanceTo(m.pos) <= LIGHT_MONSTERS_EXTRA+LIGHT_1_RADIUS ) // inside LIGHT 0 ZONE
                         .filter(m -> drone.pos.distanceTo(m.pos) >= drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy)))) // going towards me
-                        .toList();
+                        .collect(Collectors.toList());
                 potentialDanger.forEach(m -> System.err.println("AVOID getTarget POTENTIAL id="+m.id));
 
                 // select all monsters being globaly visible which could a potential danger in next turn
                 List<Creature> otherPotential = monsters.stream()
                         .filter(m -> !absoluteDanger.contains(m))
                         .filter(m -> !potentialDanger.contains(m))
-                        .toList();
+                        .collect(Collectors.toList());
                 otherPotential.forEach(m -> System.err.println("AVOID getTarget OTHER id="+m.id));
 
                 Set<Integer> additionnal = new HashSet<>();
@@ -355,13 +350,19 @@
                         } else {
                             // turn by PI/2
                             // choose the +PI/2 or -PI/2 which result to be closer to target and not off the map
-                            Point p1 = vec.rotate(Math.PI/2d).normalizedDirection(MAX_MOVE).add(drone.pos);
-                            Point p2 = vec.rotate(-Math.PI/2d).normalizedDirection(MAX_MOVE).add(drone.pos);
-                            if(p1.distanceTo(next.getTarget(drone)) < p2.distanceTo(next.getTarget(drone)) && p1.x>=0 && p1.x<=10000 && p1.y>=0 && p1.y<=10000) {
-                                System.err.println("AVOID getTarget step 2 rotation=+ p.x="+p1.x+" p.y="+p1.y);
+                            Point p1 = drone.pos.add(vec.rotate(Math.PI/2d).normalizedDirection(MAX_MOVE));
+                            Point p2 = drone.pos.add(vec.rotate(-Math.PI/2d).normalizedDirection(MAX_MOVE));
+                            if(p1.x<0 || p1.x>10000 || p1.y<0 || p1.y>10000) {
+                                System.err.println("AVOID getTarget step 2 rotation 1 p.x="+p2.x+" p.y="+p2.y);
+                                avoidVector = drone.pos.vectorTo(p2);
+                            } else if(p2.x<0 || p2.x>10000 || p2.y<0 || p2.y>10000) {
+                                System.err.println("AVOID getTarget step 2 rotation 2 p.x="+p1.x+" p.y="+p1.y);
+                                avoidVector = drone.pos.vectorTo(p1);
+                            } else if(p1.distanceTo(next.getTarget(drone)) < p2.distanceTo(next.getTarget(drone))){
+                                System.err.println("AVOID getTarget step 2 rotation 3 p.x="+p1.x+" p.y="+p1.y);
                                 avoidVector = drone.pos.vectorTo(p1);
                             } else {
-                                System.err.println("AVOID getTarget step 2 rotation=- p.x="+p2.x+" p.y="+p2.y);
+                                System.err.println("AVOID getTarget step 2 rotation 4 p.x="+p2.x+" p.y="+p2.y);
                                 avoidVector = drone.pos.vectorTo(p2);
                             }
                         }
@@ -388,7 +389,25 @@
                     }
 
                 }
-                borders.forEach(b->creatures.remove(b.id));
+                Vector v = drone.pos.vectorTo(t);
+                if(drone.pos.x>300 && t.x < 300) {
+                    System.err.println("AVOID getTarget OUT_OF_MAP x<300 target.x="+t.x);
+                    v.x/=2;
+                    v.y*=2;
+                    t = drone.pos.add(v.normalizedDirection(MAX_MOVE));
+                }
+                if(drone.pos.x<9700 && t.x > 9700) {
+                    System.err.println("AVOID getTarget OUT_OF_MAP x>9700 target.x="+t.x);
+                    v.x/=2;
+                    v.y*=2;
+                    t = drone.pos.add(v.normalizedDirection(MAX_MOVE));
+                }
+                if(drone.pos.y<9700 && t.y > 9700) {
+                    System.err.println("AVOID getTarget OUT_OF_MAP y>9700 next.y="+t.y);
+                    v.x*=2;
+                    v.y/=2;
+                    t = drone.pos.add(v.normalizedDirection(MAX_MOVE));
+                }
                 return t;
             }
 
@@ -423,24 +442,6 @@
                 return score;
             }
 
-        }
-
-        static class BorderAvoid extends Creature {
-
-            private BorderAvoid(int id, long x, long y) {
-                this.id = id;
-                this.pos.x = x;
-                this.pos.y = y;
-                this.visible = true;
-                this.type = -1;
-            }
-            static List<BorderAvoid> getBorderAvoid(Drone drone) {
-                List<BorderAvoid> borders = new ArrayList<>();
-                borders.add(new BorderAvoid(1000,0,drone.pos.y));
-                borders.add(new BorderAvoid(1001,10000,drone.pos.y));
-                borders.add(new BorderAvoid(1002,drone.pos.x,10000));
-                return borders;
-            }
         }
 
         static class Drone {
