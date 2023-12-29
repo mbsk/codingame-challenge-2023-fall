@@ -192,17 +192,17 @@
                 if(drone.pos.y < depth.start) {
                     x = drone.pos.x<=5000?2500:7500;
                 } else if(target.x == -1) {
-                    target.x = deviation>0?9000:1000;
+                    target.x = deviation>0?9500:500;
                     x = target.x;
                 } else {
-                    if(leftCount==0 && target.x <= 5000) target.x = 9000;
-                    else if(rightCount==0 && target.x >= 5000) target.x = 1000;
+                    if(leftCount==0 && target.x <= 5000) target.x = 9500;
+                    else if(rightCount==0 && target.x >= 5000) target.x = 500;
                     x = target.x;
                 }
 
                 System.err.println("DIVE R="+rightCount+ " L="+leftCount+" target.x="+target.x);
 
-                return new Point(x, depth.middle);
+                return new Point(x, depth.middle+2000);
             }
 
             public boolean isFinished(Drone drone) {
@@ -216,15 +216,20 @@
                         .distinct()
                         .count();
 
-                long scannedCount = drone.currentScan.stream().filter(i -> creatures.get(i).type == depth.type).count();
+                long scannedCountAtDepth = drone.currentScan.stream().filter(i -> creatures.get(i).type == depth.type).count();
+
+                boolean finished = scannedCountAtDepth>0 && !drone.firstToScan;
+                drone.firstToScan = scannedCountAtDepth>0;
+
                 long score = drones.values().stream().filter(d->d.mine).mapToInt(d->d.currentScan.stream().map(i->creatures.get(i)).mapToInt(Creature::getScore).sum()).sum();
 
-                System.err.println("DIVE isFINISHED score="+score+" allCurrentScan="+drone.currentScan.size()+ " type="+depth.type+" scanCount="+scannedCount+" remaining="+remainingScanCount);
+                System.err.println("DIVE isFINISHED score="+score+" allCurrentScan="+drone.currentScan.size()+ " type="+depth.type+" scanCount="+scannedCountAtDepth+" remaining="+remainingScanCount);
 
                 return depth == null
-                        || score > 20
+                        //|| score > 20
+                        || finished
                         || (drone.currentScan.size()>0 && turn-startTurn > 32)
-                        || (scannedCount>0 && remainingScanCount <= 1);
+                        || (scannedCountAtDepth>0 && remainingScanCount <= 1);
             }
 
             @Override
@@ -453,6 +458,7 @@
             final Deque<Strategy> strategy = new ArrayDeque<>();
             int initPosition = -1;
             int disableLightTurnCounter = 0;
+            boolean firstToScan = false;
 
             boolean light = false;
             Set<Integer> currentScan = new HashSet<>();
@@ -610,9 +616,9 @@
                         .filter(c -> c.wasVisible)
                         .forEach(c -> c.pos.add(new Point(c.vx,c.vy)));
 
-                creatures.values().forEach( c -> {
-                    //System.err.println("CREATURE id="+c.id+" x="+c.pos.x+" y="+c.pos.y);
-                });
+                /*creatures.values().forEach( c -> {
+                    System.err.println("CREATURE id="+c.id+" x="+c.pos.x+" y="+c.pos.y);
+                });*/
 
                 int radarBlipCount = in.nextInt();
                 drones.values().stream().forEach(Drone::resetRadar);
