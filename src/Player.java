@@ -2,9 +2,7 @@ import java.util.*;
 import java.util.List;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 /**
  * Score points by scanning valuable fish faster than your opponent.
@@ -80,10 +78,6 @@ class Player {
             return Vector.build(this, to);
         }
 
-        Point copy() {
-            return new Point(this.x, this.y);
-        }
-
     }
 
     static class Vector {
@@ -133,13 +127,6 @@ class Player {
             double num = this.x*v.x + this.y*v.y;
             double den = (Math.sqrt(Math.pow(v.x, 2) + Math.pow(v.y, 2)) * (Math.sqrt(Math.pow(this.x, 2) + Math.pow(this.y, 2))) );
             return Math.abs(Math.acos(num / den) % Math.PI);
-        }
-
-        Vector copy() {
-            Vector copy = new Vector();
-            copy.x = this.x;
-            copy.y = this.y;
-            return copy;
         }
 
     }
@@ -231,7 +218,7 @@ class Player {
                         // plot switched zone vertically : we can be more precise for y
                         int i = p.line<previousPlot.line?p.line:p.line-1;
                         p.lineWasVisible = 4;
-                        c.pos.y = Math.round((float) (_yPositions[i] + yPositions[i]) /2);
+                        c.pos.y = Math.round((float) (Math.min(Math.max(_yPositions[i], depth.start), depth.end) + Math.min(Math.max(yPositions[i], depth.start), depth.end)) /2);
                     }
                 }
             });
@@ -240,7 +227,8 @@ class Player {
             this.xPositions = _xPositions;
             this.yPositions = _yPositions;
 
-            //radar.values().forEach(p->System.err.println("COP id="+p.id+" (c,l)="+p.col+","+p.line+" x="+creatures.get(p.id).pos.x+" y="+creatures.get(p.id).pos.y));
+            radar.values().stream().sorted(Comparator.comparing(p->p.id)).forEach(p->System.err.println("COP id="+p.id+" (c,l)="+p.col+","+p.line+" x="+creatures.get(p.id).pos.x+" y="+creatures.get(p.id).pos.y
+                    +" vis="+creatures.get(p.id).visible+" was="+creatures.get(p.id).wasVisible + " (wasC, wasL)="+p.colWasVisible+","+p.lineWasVisible));
         }
 
         private void updatePlot(Set<Integer> indexes, int order, boolean isCol, Map<Integer, RadarPlot> _radar) {
@@ -264,7 +252,7 @@ class Player {
             return radar.values().stream().map(p->creatures.get(p.id)).toList();
         }
 
-        public Point getCollidingTarget(Drone drone, Creature target) {
+        public Point getTargetPosition(Drone drone, Creature target) {
             RadarPlot plot = radar.get(target.id);
             Depth depth = Depth.BY_TYPE.get(target.type);
             long xmin=0,xmax=0,ymin=0,ymax=0;
@@ -384,7 +372,7 @@ class Player {
             } else {
                 msg = "DIVE "+target.id;
                 System.err.println("#### DIVE getTarget="+target.id);
-                return cop.getCollidingTarget(drone, target);
+                return cop.getTargetPosition(drone, target);
             }
 
             // TODO
@@ -419,6 +407,7 @@ class Player {
                         if(d.peekNextMission().target == null || possibleTarget == null) return false;
                         RadarPlot p1 = cop.radar.get(d.peekNextMission().target.id);
                         RadarPlot p2 = cop.radar.get(possibleTarget.id);
+                        if(p1 == null || p2 == null) return false;
                         //System.err.println("!!!!!!!!!! "+p1.id+","+p1.col+","+p1.line+"  "+p2.id+","+p2.col+","+p2.line);
                         return p1.col==p2.col && p1.line== p2.line;
                     });
@@ -519,12 +508,10 @@ class Player {
             final List<Creature> notScanned = cop.getCreatures().stream()
                     .filter(c->c.type!=-1)
                     .filter(c->!c.myScan)
-                    .collect(Collectors.toList()); // collect to modifiable collection
-            // ignore creatures currently scanned by our drones
-            drones.values().stream().filter(d->d.mine).forEach(d->
-                    notScanned.removeAll(d.currentScan.stream().map(i->creatures.get(i)).toList()));
+                    .filter(c->!drone.currentScan.contains(c.id)) // ignore creatures currently scanned by our drones
+                    .toList(); // collect to modifiable collection
 
-            return (drone.pos.y>2000 && turn%DIVE_LIGHT_ON_EVERY==0) || (step!=DiveStep.RACE_TO_TYPE3 && notScanned.stream().anyMatch(c->drone.pos.distanceTo(c.pos)<3000));
+            return (myScore==0 && drone.pos.y>2000 && turn%DIVE_LIGHT_ON_EVERY==0) || (step!=DiveStep.RACE_TO_TYPE3 && notScanned.stream().anyMatch(c->drone.pos.distanceTo(c.pos)<3000));
         }
     }
 
@@ -546,23 +533,23 @@ class Player {
         public Point getTarget(Drone drone) {
             if(target == null) next.target = null;
 
-            //System.err.println("AVOID getTarget droneId="+drone.id);
+            System.err.println("AVOID getTarget droneId="+drone.id);
 
             // select monsters type going towards us
             List<Creature> monsters = creatures.values().stream()
                     .filter(m -> m.type == -1 && (m.visible || m.wasVisible>0 || cop.radar.get(m.id).lineWasVisible>0 || cop.radar.get(m.id).colWasVisible>0))
                     .collect(Collectors.toList()); // collect to a modifiable List
 
-            // select all monsters inside 800u and
+            // select all monsters inside our light and goig towards us
             List<Creature> absoluteDanger = monsters.stream()
-                    .filter(m -> drone.pos.distanceTo(m.pos) <= 600 ) // inside LIGHT 0 ZONE
+                    .filter(m -> drone.pos.distanceTo(m.pos) <= 650 ) // inside LIGHT 0 ZONE
                     .filter(m -> drone.pos.distanceTo(m.pos) >= drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy)))) // going towards me
                     .collect(Collectors.toList());
             absoluteDanger.forEach(m -> System.err.println("AVOID getTarget ABSOLUTEDANGER id="+m.id+" m.x="+m.pos.x+" m.y="+m.pos.y+" dist="+drone.pos.distanceTo(m.pos)+" m.vis="+m.visible+" m.was="+m.wasVisible+" vx="+m.vx+" vy="+m.vy));
 
             // select monsters who are under our light but not closer to 800
             Predicate<Creature> visibleAndGoingCloseToMe = m -> m.visible && drone.pos.distanceTo(m.pos) >= drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy))) && drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < LIGHT_1_RADIUS;
-            Predicate<Creature> wasVisibleAndCloseToMe = m -> !m.visible && m.wasVisible>0 && drone.pos.distanceTo(m.pos)<2000;
+            Predicate<Creature> wasVisibleAndCloseToMe = m -> !m.visible && drone.pos.distanceTo(m.pos)<2000;
             List<Creature> potentialDanger = monsters.stream()
                     .filter(m -> !absoluteDanger.contains(m))
                     .filter(visibleAndGoingCloseToMe.or(wasVisibleAndCloseToMe))
@@ -574,6 +561,14 @@ class Player {
                     .filter(m -> !absoluteDanger.contains(m))
                     .filter(m -> !potentialDanger.contains(m))
                     .collect(Collectors.toList());
+            // add creature from radar
+            cop.radar.values().stream()
+                    .map(p->creatures.get(p.id))
+                    .filter(m -> m.type == -1)
+                    .filter(m -> !monsters.contains(m))
+                    .filter(m -> drone.pos.distanceTo(m.pos)<2000)
+                    .forEach(otherPotential::add);
+
             otherPotential.forEach(m -> System.err.println("AVOID getTarget OTHER id="+m.id+" m.x="+m.pos.x+" m.y="+m.pos.y+" dist="+drone.pos.distanceTo(m.pos)+" m.vis="+m.visible+" m.was="+m.wasVisible+" vx="+m.vx+" vy="+m.vy));
 
             Set<Integer> additionnal = new HashSet<>();
@@ -583,6 +578,8 @@ class Player {
             while (run) {
                 finished = false;
                 Vector avoidVector = new Vector();
+
+                System.err.println("AVOID getTarget WHILE droneId="+drone.id);
 
                 if(!absoluteDanger.isEmpty() || !potentialDanger.isEmpty()) {
                     Set<Integer> list = new HashSet<>();
@@ -609,7 +606,7 @@ class Player {
                                 vec.x += v.x / (dist * ((m.visible || m.wasVisible>0)?1:dist)); // prioritize monsters which are/was really visible (not based only on radar)
                                 vec.y += v.y / (dist * ((m.visible || m.wasVisible>0)?1:dist));
                                 //System.err.println("AVOID getTarget step : monster.id=" + m.id + " dist=" + drone.pos.distanceTo(m.pos) + " nextDist=" + dist + " m.vis="+m.visible+" m.was="+m.wasVisible+" vec.x=" + vec.normalizedDirection(100).x + " vec.y=" + vec.normalizedDirection(100).y);
-                                System.err.println("AVOID getTarget step : v.x="+v.x+" v.y="+v.y);
+                                System.err.println("AVOID getTarget step : c.id="+m.id+" v.x="+v.x+" v.y="+v.y);
                             });
 
                     avoidVector = vec;
@@ -623,9 +620,9 @@ class Player {
                                 // filter out points which are out of map
                                 .filter(p-> p.x>=0 && p.x<=10000 && p.y>=0 && p.y<=10000)
                                 // filter out points which are in the LIGHT_0_RADIUS of current position of the monster
-                                .filter(p-> list.stream().map(creatures::get).noneMatch(m->p.distanceTo(m.pos) <= (m.visible?LIGHT_0_RADIUS:LIGHT_0_RADIUS*2)))
+                                .filter(p-> list.stream().map(creatures::get).noneMatch(m->p.distanceTo(m.pos) <= (m.visible?LIGHT_0_RADIUS+50:LIGHT_0_RADIUS*2)))
                                 // filter out points which are in the LIGHT_0_RADIUS of next position of the monster
-                                .filter(p-> list.stream().map(creatures::get).noneMatch(m->p.distanceTo(m.pos.add(new Point(m.vx, m.vy))) <= (m.visible?LIGHT_0_RADIUS:LIGHT_0_RADIUS*2)))
+                                .filter(p-> list.stream().map(creatures::get).noneMatch(m->p.distanceTo(m.pos.add(new Point(m.vx, m.vy))) <= (m.visible?LIGHT_0_RADIUS+50:LIGHT_0_RADIUS*2)))
                                 // get the one which minimize the distance to target
                                 .min(Comparator.comparing(p->p.distanceTo(nextTarget))).orElse(null);
 
@@ -654,7 +651,7 @@ class Player {
                 // check whether there is a potential kill
                 List<Creature> killHits = otherPotential.stream()
                         .filter(m -> !additionnal.contains(m.id))
-                        .filter(m -> tmp.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < (m.visible?KILL_DISTANCE:KILL_DISTANCE*2))
+                        .filter(m -> tmp.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < (m.visible?LIGHT_0_RADIUS:KILL_DISTANCE*2))
                         .toList();
                 killHits.forEach(m -> System.err.println("AVOID getTarget KILL HITS id=" + m.id));
                 if (killHits.isEmpty()) {
@@ -796,7 +793,7 @@ class Player {
             light = disableLightTurnCounter<=0 && battery>=5 && next.isLightOn(this);
             if(light) this.disableLightTurnCounter=2;
 
-            System.out.println("MOVE "+target.x+" "+target.y+" "+(light?1:0)+" "+next.msg);
+            System.out.println("MOVE "+target.x+" "+target.y+" "+(light?1:0)+" B="+this.battery+" "+next.msg);
         }
 
     }

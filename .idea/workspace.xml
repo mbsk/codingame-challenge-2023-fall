@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="14336eba-f30b-49f1-9109-88c3ecd89fd2" name="Changes" comment="01/01 23h20 1st 381st">
+    <list default="true" id="14336eba-f30b-49f1-9109-88c3ecd89fd2" name="Changes" comment="03/01 moved to gold">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/Player.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/Player.java" afterDir="false" />
     </list>
@@ -127,7 +127,15 @@
       <option name="project" value="LOCAL" />
       <updated>1704154911929</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="03/01 moved to gold">
+      <option name="closed" value="true" />
+      <created>1704246795805</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1704246795805</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -149,7 +157,8 @@
     <MESSAGE value="avoid borders" />
     <MESSAGE value="29/12 23h20 silver 343rd" />
     <MESSAGE value="01/01 23h20 1st 381st" />
-    <option name="LAST_COMMIT_MESSAGE" value="01/01 23h20 1st 381st" />
+    <MESSAGE value="03/01 moved to gold" />
+    <option name="LAST_COMMIT_MESSAGE" value="03/01 moved to gold" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -163,11 +172,6 @@
           <url>file://$PROJECT_DIR$/src/Test.java</url>
           <line>42</line>
           <option name="timeStamp" value="3" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="java-line">
-          <url>file://$PROJECT_DIR$/src/Player.java</url>
-          <line>331</line>
-          <option name="timeStamp" value="28" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
