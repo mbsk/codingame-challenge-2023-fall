@@ -1,6 +1,8 @@
 import java.util.*;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -17,13 +19,15 @@ class Player {
     final static int LIGHT_MONSTERS_EXTRA = 300;
     final static Point ORIGIN = new Point(0,0);
 
-    final static int DIVE_LIGHT_ON_EVERY = 3;
+    final static int DIVE_LIGHT_ON_EVERY = 2;
 
     static Map<Integer, Creature> creatures = new HashMap<>();
     static Map<Integer, Drone> drones = new HashMap<>();
     static CommonOperationPicture cop = new CommonOperationPicture();
 
     static int turn = 0;
+    static int myScore = 0;
+    static int foeScore = 0;
 
     enum Depth {
         L0(-10,0), L1(0,2500),L2(1,5000),L3(2,7500), MONSTER(-1, 2500, 10000);
@@ -199,7 +203,9 @@ class Player {
                 Creature c = creatures.get(p.id);
                 p.lineWasVisible--;
                 p.colWasVisible--;
-                if(!c.visible && !c.wasVisible) {
+                c.wasVisible--;
+                //System.err.println("COP UPDATE id="+p.id+" col="+p.col+" lin="+p.line+" wasC="+p.colWasVisible+" wasL="+p.lineWasVisible);
+                if(!c.visible && c.wasVisible<=0) {
                     Depth depth = Depth.BY_TYPE.get(c.type);
 
                     if(p.colWasVisible<=0) {
@@ -218,13 +224,13 @@ class Player {
                     if(previousPlot!=null && previousPlot.col!=p.col) {
                         // plot switched zone horizontally : we can be more precise for x
                         int i = p.col<previousPlot.col?p.col:p.col-1;
-                        p.colWasVisible = 2;
+                        p.colWasVisible = 4;
                         c.pos.x = Math.round((float) (_xPositions[i] + xPositions[i]) /2);
                     }
                     if(previousPlot!=null && previousPlot.line!=p.line) {
                         // plot switched zone vertically : we can be more precise for y
                         int i = p.line<previousPlot.line?p.line:p.line-1;
-                        p.lineWasVisible = 2;
+                        p.lineWasVisible = 4;
                         c.pos.y = Math.round((float) (_yPositions[i] + yPositions[i]) /2);
                     }
                 }
@@ -234,16 +240,21 @@ class Player {
             this.xPositions = _xPositions;
             this.yPositions = _yPositions;
 
-            radar.values().forEach(p->System.err.println("COP id="+p.id+" (c,l)="+p.col+","+p.line+" x="+creatures.get(p.id).pos.x+" y="+creatures.get(p.id).pos.y));
+            //radar.values().forEach(p->System.err.println("COP id="+p.id+" (c,l)="+p.col+","+p.line+" x="+creatures.get(p.id).pos.x+" y="+creatures.get(p.id).pos.y));
         }
 
         private void updatePlot(Set<Integer> indexes, int order, boolean isCol, Map<Integer, RadarPlot> _radar) {
             indexes.stream()
-                    .map(i->creatures.get(i))
+                    .map(creatures::get)
                     .forEach(c-> {
                         _radar.putIfAbsent(c.id, new RadarPlot());
                         RadarPlot plot = _radar.get(c.id);
                         plot.id = c.id;
+                        RadarPlot previousPlot = radar.get(c.id);
+                        if(previousPlot!=null) {
+                            plot.colWasVisible = previousPlot.colWasVisible;
+                            plot.lineWasVisible = previousPlot.lineWasVisible;
+                        }
                         if(isCol) plot.col+=order;
                         else plot.line+=order;
                     });
@@ -257,14 +268,14 @@ class Player {
             RadarPlot plot = radar.get(target.id);
             Depth depth = Depth.BY_TYPE.get(target.type);
             long xmin=0,xmax=0,ymin=0,ymax=0;
-            if(plot.colWasVisible>0 || target.visible || target.wasVisible) {
+            if(plot.colWasVisible>0 || target.visible || target.wasVisible>0) {
                 xmin = target.pos.x;
                 xmax = xmin;
             } else {
                 xmin = plot.col==0?0:xPositions[plot.col-1];
                 xmax = plot.col==xPositions.length?10000:xPositions[plot.col];
             }
-            if(plot.lineWasVisible>0 || target.visible || target.wasVisible) {
+            if(plot.lineWasVisible>0 || target.visible || target.wasVisible>0) {
                 ymin = target.pos.y;
                 ymax = ymin;
             } else {
@@ -273,11 +284,14 @@ class Player {
                 ymin = Math.max(ymin,depth.start);
                 ymax = Math.min(ymax,depth.end);
             }
-            Point p1 = new Point(xmin,ymin);
+            /*Point p1 = new Point(xmin,ymin);
             Point p2 = new Point(xmin,ymax);
             Point p3 = new Point(xmax,ymin);
             Point p4 = new Point(xmax,ymax);
-            return Stream.of(p1,p2,p3,p4).max(Comparator.comparing(p -> drone.pos.distanceTo(p))).orElse(null);
+            return Stream.of(p1,p2,p3,p4).max(Comparator.comparing(p -> drone.pos.distanceTo(p))).orElse(null);*/
+            Point p = new Point((xmin+xmax)/2, (ymin+ymax)/2); // return middle of the cell
+            System.err.println("GET TARGET POSITION d="+ drone.id+" c="+target.id+" wasL="+plot.lineWasVisible+" wasC="+plot.colWasVisible+" p.x="+p.x+" p.y="+p.y+" ["+xmin+","+xmax+"] ["+ymin+","+ymax+"]");
+            return p;
         }
     }
 
@@ -301,15 +315,16 @@ class Player {
 
     }
 
-    /**
-     * 1) Dive to closest type3
-     * 2) as soon as 2 type3 are scanned => both robots surface and need to scan every type1 and type2
-     * 3) the closest to surface scan type2 and typein priority only
-     * 4) the deepest to surface scan
-     */
     static class Dive extends Strategy {
 
-        enum DiveStep {RACE_TO_TYPE3, RACE_SURFACE, COMPLETE}
+        /**
+         * 1) Dive to closest type3
+         * 2) as soon as 2 type3 are scanned => both robots surface and need to scan every type1 and type2
+         * 3) the closest to surface scan type2 and typein priority only
+         * 4) the deepest to surface scan
+         */
+
+        enum DiveStep {RACE_TO_TYPE3, SURFACE, RACE_TO_SURFACE}
 
         DiveStep step = null;
 
@@ -326,24 +341,35 @@ class Player {
             // if our current target was scanned, change it
             if(target!=null && !notScanned.contains(target)) target = null;
 
-            long remainingType3 = notScanned.stream().filter(c->c.type==Depth.L3.type).count();
-            if(remainingType3>2) {
+            if(creatures.values().stream().filter(c->c.foeScan).count() >= 6 && myScore == 0) {
+                step=DiveStep.RACE_TO_SURFACE;
+                target = null;
+            } else if (canWin()) {
+                step = DiveStep.SURFACE;
+                target = null;
+            } /*else if (step==DiveStep.RACE_TO_TYPE3) {
+                Drone bestScoreDrone = drones.values().stream().max(Comparator.comparing(Drone::getCurrentScanScore)).orElse(null);
+                step=(bestScoreDrone!=null && bestScoreDrone.id==drone.id)?DiveStep.RACE_TO_SURFACE:DiveStep.SURFACE;
+                target = null;
+            } */
+            else {
                 if(step!=DiveStep.RACE_TO_TYPE3) {
                     step=DiveStep.RACE_TO_TYPE3;
                     target = null;
                 }
-                // find a type3
-                if(target==null) target = getPossibleTarget(drone, notScanned, Depth.L3, new ArrayList<>());
-            } else if(step==DiveStep.RACE_TO_TYPE3 || step==DiveStep.RACE_SURFACE) {
-                if(step!=DiveStep.RACE_SURFACE) {
-                    step=DiveStep.RACE_SURFACE;
+
+            }
+
+            if(target == null) {
+                if(step==DiveStep.SURFACE) {
+                    // 2x type3 were scanned
+                    // go to surface and scan all L2+L1 remaining creatures
+                    target = getPossibleTarget(drone, notScanned, Depth.L2, new ArrayList<>());
+                } else if (step==DiveStep.RACE_TO_SURFACE) {
                     target = null;
+                } else{
+                    target = getPossibleTarget(drone, notScanned, Depth.L3, new ArrayList<>());
                 }
-                // 2x type3 were scanned
-                // go to surface and scan all L2+L1 remaining creatures
-                if(target==null) target = getPossibleTarget(drone, notScanned, Depth.L2, new ArrayList<>());
-            } else{
-                if(target==null) target = getPossibleTarget(drone, notScanned, Depth.L3, new ArrayList<>());
             }
 
             // if all drone's scan were scored while going to surface, choose another target
@@ -388,8 +414,15 @@ class Player {
                     else if (depth == Depth.L2) depth = Depth.L1;
                     else depth = Depth.L0;
                 } else {
-                    List<Drone> droneWithSameTarget = myOtherDrones.stream().filter(d -> d.peekNextMission().target == possibleTarget).toList();
-                    if (droneWithSameTarget.isEmpty()) {
+                    //List<Drone> droneWithSameTarget = myOtherDrones.stream().filter(d -> d.peekNextMission().target == possibleTarget).toList();
+                    boolean droneWithSameTargetCell = myOtherDrones.stream().anyMatch(d -> {
+                        if(d.peekNextMission().target == null || possibleTarget == null) return false;
+                        RadarPlot p1 = cop.radar.get(d.peekNextMission().target.id);
+                        RadarPlot p2 = cop.radar.get(possibleTarget.id);
+                        //System.err.println("!!!!!!!!!! "+p1.id+","+p1.col+","+p1.line+"  "+p2.id+","+p2.col+","+p2.line);
+                        return p1.col==p2.col && p1.line== p2.line;
+                    });
+                    if (!droneWithSameTargetCell) {
                         target = possibleTarget;
                         run = false;
                     } else {
@@ -399,6 +432,82 @@ class Player {
                 }
             }
             return target;
+        }
+
+        public boolean canWin() {
+
+            List<Drone> myDrones = drones.values().stream().filter(d->d.mine).toList();
+
+            Set<Integer> notScored = creatures.values().stream().filter(c->c.type!=-1 && !c.myScan && !c.foeScan ).map(c->c.id).collect(Collectors.toSet());
+            Set<Integer> remaining = creatures.values().stream().filter(c->c.type!=-1 && !c.myScan).map(c->c.id).collect(Collectors.toSet());
+
+            Set<Integer> possibleScoredAsFirst = new HashSet<>();
+            // all our scan which are not scored
+            myDrones.forEach(d->possibleScoredAsFirst.addAll(d.currentScan.stream().filter(notScored::contains).toList()));
+            // add all not scored scans from L1 and L2
+            notScored.stream().map(creatures::get).filter(c->c.type<Depth.L3.type).map(c->c.id).forEach(possibleScoredAsFirst::add);
+
+            /*
+            calculate our potential score if we score all our current scan and above creatures as first
+            it's the sum of
+            + current score
+            + all current scan if scored as first
+            + L2/L1 creatures not scanned if scored as first
+            + all remaining if scored as 2nd
+             */
+
+            int myPossibleScore = myScore // currentScore
+                    + possibleScoredAsFirst.stream().map(creatures::get).mapToInt(c->(c.type+1)*2).sum() // all current scanned and if scored as first
+                    + remaining.stream().filter(i->!possibleScoredAsFirst.contains(i)).map(creatures::get).mapToInt(c->(c.type+1)).sum(); // all remaining creatures
+            // check type combo
+            for(int type=0;type<=2;type++) {
+                int i = type;
+                if(creatures.values().stream().anyMatch(c->c.type==i && !c.myScan)) {
+                    // a combo is possible
+                    boolean isComboAsFirstPossible = creatures.values().stream().anyMatch(c->c.type==i && !c.foeScan); // if foe didn't scored all type
+                    Predicate<Creature> isScoredAsFirst = c->possibleScoredAsFirst.contains(c.id) || c.myScan;
+                    myPossibleScore+=(isComboAsFirstPossible && creatures.values().stream().filter(c->c.type==i).allMatch(isScoredAsFirst))?8:4;
+                }
+            }
+            // check color combo
+            for(int color=0;color<=3;color++) {
+                int i = color;
+                if(creatures.values().stream().anyMatch(c->c.color==i && !c.myScan)) {
+                    // a combo is possible
+                    boolean isComboAsFirstPossible = creatures.values().stream().anyMatch(c->c.color==i && !c.foeScan); // if foe didn't scored all color
+                    Predicate<Creature> isScoredAsFirst = c->possibleScoredAsFirst.contains(c.id) || c.myScan;
+                    myPossibleScore+=(isComboAsFirstPossible && creatures.values().stream().filter(c->c.color==i).allMatch(isScoredAsFirst))?6:3;
+                }
+            }
+
+            Set<Integer> foePossibleScoredAtFirst = notScored.stream().filter(i->!possibleScoredAsFirst.contains(i)).collect(Collectors.toSet());
+            remaining = creatures.values().stream().filter(c->c.type!=-1 && !c.foeScan).map(c->c.id).collect(Collectors.toSet());
+
+            int foePossibleScore = foeScore // currentScore
+                    + foePossibleScoredAtFirst.stream().map(creatures::get).mapToInt(c->(c.type+1)*2).sum() // all current scanned and if scored as first
+                    + remaining.stream().filter(i->!foePossibleScoredAtFirst.contains(i)).map(creatures::get).mapToInt(c->(c.type+1)).sum(); // all remaining creatures
+            // check foe type combo
+            for(int type=0;type<=2;type++) {
+                int i = type;
+                if(creatures.values().stream().anyMatch(c->c.type==i && !c.foeScan)) {
+                    // a combo is possible
+                    boolean isComboAsFirstPossible = creatures.values().stream().anyMatch(c->c.type==i && !c.myScan); // if we didn't scored all type
+                    Predicate<Creature> isScoredAsFirst = c->foePossibleScoredAtFirst.contains(c.id) || c.foeScan;
+                    foePossibleScore+=(isComboAsFirstPossible && creatures.values().stream().filter(c->c.type==i).anyMatch(isScoredAsFirst))?8:4;
+                }
+            }
+            // check foe color combo
+            for(int color=0;color<=3;color++) {
+                int i = color;
+                if(creatures.values().stream().anyMatch(c->c.color==i && !c.foeScan)) {
+                    boolean isComboAsFirstPossible = creatures.values().stream().anyMatch(c->c.color==i && !c.myScan); // if I didn't scored all color
+                    Predicate<Creature> isScoredAsFirst = c->foePossibleScoredAtFirst.contains(c.id) || c.foeScan;
+                    foePossibleScore+=(isComboAsFirstPossible && creatures.values().stream().filter(c->c.color==i).anyMatch(isScoredAsFirst))?6:3;
+                }
+            }
+            System.err.println("CAN WIN my="+myPossibleScore+" foe="+foePossibleScore);
+
+            return myPossibleScore > foePossibleScore;
         }
 
         public boolean isFinished(Drone drone) {
@@ -423,11 +532,13 @@ class Player {
 
         Strategy next;
         boolean finished = false;
+        int startTurn;
 
         public Avoid(Strategy next) {
             this.next = next;
             target = next.target;
             msg = "AVOID";
+            startTurn = turn;
         }
 
 
@@ -435,34 +546,35 @@ class Player {
         public Point getTarget(Drone drone) {
             if(target == null) next.target = null;
 
-            System.err.println("AVOID getTarget droneId="+drone.id);
+            //System.err.println("AVOID getTarget droneId="+drone.id);
 
             // select monsters type going towards us
             List<Creature> monsters = creatures.values().stream()
-                    .filter(m -> m.type == -1 && (m.visible || m.wasVisible || cop.radar.get(m.id).lineWasVisible>0 || cop.radar.get(m.id).colWasVisible>0))
+                    .filter(m -> m.type == -1 && (m.visible || m.wasVisible>0 || cop.radar.get(m.id).lineWasVisible>0 || cop.radar.get(m.id).colWasVisible>0))
                     .collect(Collectors.toList()); // collect to a modifiable List
 
-            // select all monsters inside 800u
+            // select all monsters inside 800u and
             List<Creature> absoluteDanger = monsters.stream()
-                    .filter(m -> drone.pos.distanceTo(m.pos) <= 800 ) // inside LIGHT 0 ZONE
+                    .filter(m -> drone.pos.distanceTo(m.pos) <= 600 ) // inside LIGHT 0 ZONE
                     .filter(m -> drone.pos.distanceTo(m.pos) >= drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy)))) // going towards me
                     .collect(Collectors.toList());
-            absoluteDanger.forEach(m -> System.err.println("AVOID getTarget ABSOLUTEDANGER id="+m.id));
+            absoluteDanger.forEach(m -> System.err.println("AVOID getTarget ABSOLUTEDANGER id="+m.id+" m.x="+m.pos.x+" m.y="+m.pos.y+" dist="+drone.pos.distanceTo(m.pos)+" m.vis="+m.visible+" m.was="+m.wasVisible+" vx="+m.vx+" vy="+m.vy));
 
             // select monsters who are under our light but not closer to 800
+            Predicate<Creature> visibleAndGoingCloseToMe = m -> m.visible && drone.pos.distanceTo(m.pos) >= drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy))) && drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < LIGHT_1_RADIUS;
+            Predicate<Creature> wasVisibleAndCloseToMe = m -> !m.visible && m.wasVisible>0 && drone.pos.distanceTo(m.pos)<2000;
             List<Creature> potentialDanger = monsters.stream()
                     .filter(m -> !absoluteDanger.contains(m))
-                    .filter(m -> drone.pos.distanceTo(m.pos) <= LIGHT_MONSTERS_EXTRA+LIGHT_1_RADIUS ) // inside LIGHT 0 ZONE
-                    .filter(m -> drone.pos.distanceTo(m.pos) >= drone.pos.distanceTo(m.pos.add(new Point(m.vx, m.vy)))) // going towards me
+                    .filter(visibleAndGoingCloseToMe.or(wasVisibleAndCloseToMe))
                     .collect(Collectors.toList());
-            potentialDanger.forEach(m -> System.err.println("AVOID getTarget POTENTIAL id="+m.id));
+            potentialDanger.forEach(m -> System.err.println("AVOID getTarget POTENTIAL id="+m.id+" m.x="+m.pos.x+" m.y="+m.pos.y+" dist="+drone.pos.distanceTo(m.pos)+" m.vis="+m.visible+" m.was="+m.wasVisible+" vx="+m.vx+" vy="+m.vy));
 
             // select all monsters being globaly visible which could a potential danger in next turn
             List<Creature> otherPotential = monsters.stream()
                     .filter(m -> !absoluteDanger.contains(m))
                     .filter(m -> !potentialDanger.contains(m))
                     .collect(Collectors.toList());
-            otherPotential.forEach(m -> System.err.println("AVOID getTarget OTHER id="+m.id));
+            otherPotential.forEach(m -> System.err.println("AVOID getTarget OTHER id="+m.id+" m.x="+m.pos.x+" m.y="+m.pos.y+" dist="+drone.pos.distanceTo(m.pos)+" m.vis="+m.visible+" m.was="+m.wasVisible+" vx="+m.vx+" vy="+m.vy));
 
             Set<Integer> additionnal = new HashSet<>();
 
@@ -472,29 +584,17 @@ class Player {
                 finished = false;
                 Vector avoidVector = new Vector();
 
-                if (!absoluteDanger.isEmpty()) {
-                    // flew in opposite direction
+                if(!absoluteDanger.isEmpty() || !potentialDanger.isEmpty()) {
                     Set<Integer> list = new HashSet<>();
-                    list.addAll(absoluteDanger.stream().map(m -> m.id).toList());
-                    list.addAll(additionnal);
-                    Vector vec = new Vector();
-                    list.stream()
-                            .map(i -> creatures.get(i))
-                            .forEach(m -> {
-                                Point nextPos = m.pos.add(new Point(m.vx, m.vy));
-                                double dist = drone.pos.distanceTo(nextPos);
-                                Vector v = nextPos.vectorTo(drone.pos);
-                                vec.x += v.x / (dist * dist);
-                                vec.y += v.y / (dist * dist);
-                                System.err.println("AVOID getTarget step 1 : monster.id=" + m.id + " dist=" + dist + " vec.x=" + vec.x + " vec.y=" + vec.y);
-                            });
-                    avoidVector = vec;
-                } else if (!potentialDanger.isEmpty()) {
-                    // flew by 90° minimum or direct to target
-                    Set<Integer> list = new HashSet<>();
+                    if (!absoluteDanger.isEmpty()) {
+                        System.err.println("AVOID getTarget step 1");
+                        list.addAll(absoluteDanger.stream().map(m -> m.id).toList());
+                    } else {
+                        System.err.println("AVOID getTarget step 2");
+                    }
                     list.addAll(potentialDanger.stream().map(m -> m.id).toList());
                     list.addAll(additionnal);
-                    System.err.println("AVOID getTarget step 2 : monsters.size=" + list.size());
+
                     Vector vec = new Vector();
                     list.stream()
                             .map(i -> creatures.get(i))
@@ -502,38 +602,45 @@ class Player {
                                 Point nextPos = m.pos.add(new Point(m.vx, m.vy));
                                 double dist = drone.pos.distanceTo(nextPos);
                                 Vector v = nextPos.vectorTo(drone.pos);
-                                vec.x += v.x / (dist * dist);
-                                vec.y += v.y / (dist * dist);
-                                System.err.println("AVOID getTarget step 2 : drone.id=" + drone.id + " d.x="+drone.pos.x+" d.y="+drone.pos.y);
-                                System.err.println("AVOID getTarget step 2 : monster.id=" + m.id + " m.x="+m.pos.x+" m.y="+m.pos.y+" dist=" + dist + " vec.x=" + vec.x + " vec.y=" + vec.y);
+                                if(dist<1) {
+                                    dist = 1;
+                                    v = m.pos.vectorTo(drone.pos);
+                                }
+                                vec.x += v.x / (dist * ((m.visible || m.wasVisible>0)?1:dist)); // prioritize monsters which are/was really visible (not based only on radar)
+                                vec.y += v.y / (dist * ((m.visible || m.wasVisible>0)?1:dist));
+                                //System.err.println("AVOID getTarget step : monster.id=" + m.id + " dist=" + drone.pos.distanceTo(m.pos) + " nextDist=" + dist + " m.vis="+m.visible+" m.was="+m.wasVisible+" vec.x=" + vec.normalizedDirection(100).x + " vec.y=" + vec.normalizedDirection(100).y);
+                                System.err.println("AVOID getTarget step : v.x="+v.x+" v.y="+v.y);
                             });
 
-                    Point nextTarget = next.getTarget(drone);
-                    avoidVector = drone.pos.vectorTo(nextTarget);
-                    double a = vec.angleTo(avoidVector);
-                    System.err.println("AVOID getTarget step 2 : avoid.x=" + avoidVector.x + " avoid.y=" + avoidVector.y + " a=" + a);
-                    if (Math.abs(a) < Math.PI / 2) {
-                        finished = true;
-                        System.err.println("AVOID getTarget step 2 : direct route to target");
-                    } else {
-                        // turn by PI/2
-                        // choose the +PI/2 or -PI/2 which result to be closer to target and not off the map
-                        Point p1 = drone.pos.add(vec.rotate(Math.PI / 2d).normalizedDirection(MAX_MOVE));
-                        Point p2 = drone.pos.add(vec.rotate(-Math.PI / 2d).normalizedDirection(MAX_MOVE));
-                        if (p1.x < 0 || p1.x > 10000 || p1.y < 0 || p1.y > 10000) {
-                            System.err.println("AVOID getTarget step 2 rotation 1 p.x=" + p2.x + " p.y=" + p2.y);
-                            avoidVector = drone.pos.vectorTo(p2);
-                        } else if (p2.x < 0 || p2.x > 10000 || p2.y < 0 || p2.y > 10000) {
-                            System.err.println("AVOID getTarget step 2 rotation 2 p.x=" + p1.x + " p.y=" + p1.y);
-                            avoidVector = drone.pos.vectorTo(p1);
-                        } else if (p1.distanceTo(nextTarget) < p2.distanceTo(nextTarget)) {
-                            System.err.println("AVOID getTarget step 2 rotation 3 p.x=" + p1.x + " p.y=" + p1.y);
-                            avoidVector = drone.pos.vectorTo(p1);
+                    avoidVector = vec;
+                    if (absoluteDanger.isEmpty()) {
+                        double size = 72;
+                        List<Point> points = IntStream.range(0,(int)size).mapToObj(a->drone.pos.add(vec.rotate(2d*(double)a*Math.PI/size).normalizedDirection(MAX_MOVE))).toList();
+
+                        Point nextTarget = next.getTarget(drone);
+                        //nextTarget.x = drone.pos.y<nextTarget.y-1000?drone.pos.x:nextTarget.x;
+                        Point avoidPoint = points.stream()
+                                // filter out points which are out of map
+                                .filter(p-> p.x>=0 && p.x<=10000 && p.y>=0 && p.y<=10000)
+                                // filter out points which are in the LIGHT_0_RADIUS of current position of the monster
+                                .filter(p-> list.stream().map(creatures::get).noneMatch(m->p.distanceTo(m.pos) <= (m.visible?LIGHT_0_RADIUS:LIGHT_0_RADIUS*2)))
+                                // filter out points which are in the LIGHT_0_RADIUS of next position of the monster
+                                .filter(p-> list.stream().map(creatures::get).noneMatch(m->p.distanceTo(m.pos.add(new Point(m.vx, m.vy))) <= (m.visible?LIGHT_0_RADIUS:LIGHT_0_RADIUS*2)))
+                                // get the one which minimize the distance to target
+                                .min(Comparator.comparing(p->p.distanceTo(nextTarget))).orElse(null);
+
+                        if(avoidPoint!=null) {
+                            // check if we can go directly to destination
+                            avoidVector = drone.pos.vectorTo(avoidPoint);
+                            double a = avoidVector.angleTo(drone.pos.vectorTo(nextTarget));
+                            System.err.println("AVOID getTarget step : avoid.x=" + avoidVector.x + " avoid.y=" + avoidVector.y + " a=" + a);
+
                         } else {
-                            System.err.println("AVOID getTarget step 2 rotation 4 p.x=" + p2.x + " p.y=" + p2.y);
-                            avoidVector = drone.pos.vectorTo(p2);
+                            System.err.println("AVOID getTarget step : COULDN'T find any escape vector => going directly to target");
                         }
                     }
+
+
                 } else {
                     finished = true;
                 }
@@ -547,13 +654,14 @@ class Player {
                 // check whether there is a potential kill
                 List<Creature> killHits = otherPotential.stream()
                         .filter(m -> !additionnal.contains(m.id))
-                        .filter(m -> tmp.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < KILL_DISTANCE)
+                        .filter(m -> tmp.distanceTo(m.pos.add(new Point(m.vx, m.vy))) < (m.visible?KILL_DISTANCE:KILL_DISTANCE*2))
                         .toList();
                 killHits.forEach(m -> System.err.println("AVOID getTarget KILL HITS id=" + m.id));
                 if (killHits.isEmpty()) {
                     run = false;
                 } else {
                     additionnal.addAll(killHits.stream().map(m -> m.id).toList());
+                    potentialDanger.addAll(killHits.stream().filter(m->!potentialDanger.contains(m)).toList());
                 }
 
             }
@@ -576,17 +684,17 @@ class Player {
                 v.y/=2;
                 t = drone.pos.add(v.normalizedDirection(MAX_MOVE));
             }
-            // TODO
-            //- return next.getTarget() if finished true
-            //msg = "AVOID next=("+next.
             if(finished) msg = next.msg;
             return t;
         }
 
         @Override
         public boolean isLightOn(Drone drone) {
-            boolean light = drone.pos.distanceTo(next.getTarget(drone))<3000; // only light if nearby our target (because if scanned, it can change the next one)
-            drone.disableLightTurnCounter = light?0:2;
+            // light if nearby our target (because if scanned, it can change the next one)
+            // or a nearby monsters just disappeared (wasVisible=1)
+            boolean light = creatures.values().stream().anyMatch(m -> m.type == -1 && !m.visible && m.wasVisible==1 && drone.pos.distanceTo(m.pos)<2000)
+                    || drone.pos.distanceTo(next.getTarget(drone))<LIGHT_1_RADIUS+500;
+            if(light) drone.disableLightTurnCounter = 0;
             return light;
         }
 
@@ -606,7 +714,7 @@ class Player {
         boolean myScan = false;
         boolean foeScan = false;
         boolean visible = false;
-        boolean wasVisible = false;
+        int wasVisible = 0;
 
     }
 
@@ -665,15 +773,16 @@ class Player {
                 strategy.poll();
                 next = peekNextMission();
             }
+            System.err.println("\n======================================================================");
             System.err.println("DRONE.process droneId="+this.id+" next="+next.getClass().getSimpleName());
 
             // handle monsters
             List<Creature> monsters = creatures.values().stream()
-                    .filter(c -> c.visible || c.wasVisible) // keep only visible
+                    .filter(c -> c.visible || c.wasVisible>0) // keep only visible
                     .filter(c -> c.type == -1) // keep only monsters
                     .filter(c -> this.pos.distanceTo(c.pos) <= LIGHT_MONSTERS_EXTRA+LIGHT_1_RADIUS)
                     .toList();
-            monsters.forEach(m -> System.err.println("MONSTERS drone="+this.id+" monster="+m.id));
+            //monsters.forEach(m -> System.err.println("MONSTERS drone="+this.id+" monster="+m.id));
             // monster avoidance management
             if(!monsters.isEmpty() && !(next instanceof Avoid)) {
                 next = new Avoid(next);
@@ -689,6 +798,7 @@ class Player {
 
             System.out.println("MOVE "+target.x+" "+target.y+" "+(light?1:0)+" "+next.msg);
         }
+
     }
 
     public static void main(String args[]) {
@@ -707,10 +817,9 @@ class Player {
         // game loop
         while (true) {
             turn++;
-            int myScore = in.nextInt();
-            int foeScore = in.nextInt();
+            myScore = in.nextInt();
+            foeScore = in.nextInt();
             int myScanCount = in.nextInt();
-
             for (int i = 0; i < myScanCount; i++) {
                 int creatureId = in.nextInt();
                 creatures.get(creatureId).myScan = true;
@@ -753,7 +862,7 @@ class Player {
                 if(drone.emergency==0) drone.currentScan.add(creatureId);
             }
             creatures.values().forEach(creature -> {
-                creature.wasVisible = creature.visible;
+                creature.wasVisible = creature.visible?3:creature.wasVisible;
                 creature.visible=false;
             });
             int visibleCreatureCount = in.nextInt();
@@ -766,15 +875,10 @@ class Player {
                 creature.vx = in.nextInt();
                 creature.vy = in.nextInt();
             }
-            // update creatures which became not visible on last turn based on their last velocity vector
-            creatures.values().stream()
-                    .filter(c -> !c.visible)
-                    .filter(c -> c.wasVisible)
-                    .forEach(c -> c.pos.add(new Point(c.vx,c.vy)));
-
-                /*creatures.values().forEach( c -> {
-                    System.err.println("CREATURE id="+c.id+" x="+c.pos.x+" y="+c.pos.y);
-                });*/
+            creatures.values().stream().filter(c->!c.visible && c.wasVisible>0).forEach(c -> {
+                c.pos.x += c.vx;
+                c.pos.y += c.vy;
+            });
 
             int radarBlipCount = in.nextInt();
             drones.values().forEach(Drone::resetRadar);
