@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="14336eba-f30b-49f1-9109-88c3ecd89fd2" name="Changes" comment="- better precision on line crossing (use depth boundaries to calculate mid position)&#10;- improve lighting behavior on DIVE strategy (don't switch on anymore if a nearby creatures were already scan by me)&#10;- increase absoluteDanger detection from 600u to 650u&#10;- add radar wasVisible to potentialDanger&#10;- add radar creatures to otherPotential&#10;- increase filter detection by 50u in the azimuth filtering&#10;- increase KILL detection from KILL_DISTANCE to 800u">
+    <list default="true" id="14336eba-f30b-49f1-9109-88c3ecd89fd2" name="Changes" comment="07/01 last day 287th">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/Player.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/Player.java" afterDir="false" />
     </list>
@@ -143,7 +143,15 @@
       <option name="project" value="LOCAL" />
       <updated>1704302272348</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="07/01 last day 287th">
+      <option name="closed" value="true" />
+      <created>1704656886835</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1704656886835</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -167,7 +175,8 @@
     <MESSAGE value="01/01 23h20 1st 381st" />
     <MESSAGE value="03/01 moved to gold" />
     <MESSAGE value="- better precision on line crossing (use depth boundaries to calculate mid position)&#10;- improve lighting behavior on DIVE strategy (don't switch on anymore if a nearby creatures were already scan by me)&#10;- increase absoluteDanger detection from 600u to 650u&#10;- add radar wasVisible to potentialDanger&#10;- add radar creatures to otherPotential&#10;- increase filter detection by 50u in the azimuth filtering&#10;- increase KILL detection from KILL_DISTANCE to 800u" />
-    <option name="LAST_COMMIT_MESSAGE" value="- better precision on line crossing (use depth boundaries to calculate mid position)&#10;- improve lighting behavior on DIVE strategy (don't switch on anymore if a nearby creatures were already scan by me)&#10;- increase absoluteDanger detection from 600u to 650u&#10;- add radar wasVisible to potentialDanger&#10;- add radar creatures to otherPotential&#10;- increase filter detection by 50u in the azimuth filtering&#10;- increase KILL detection from KILL_DISTANCE to 800u" />
+    <MESSAGE value="07/01 last day 287th" />
+    <option name="LAST_COMMIT_MESSAGE" value="07/01 last day 287th" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
